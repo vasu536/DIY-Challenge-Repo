@@ -3,7 +3,8 @@
 ROS 2 Humble · Jetson Nano · Hesai QT64 · FAST-LIO2 · Nav2
 
 Autonomous robot software stack for the DIY Robot Challenge 2026.  
-Full documentation: **[docs/DIY_Challenge_Robot_Guide.pdf](docs/DIY_Challenge_Robot_Guide.pdf)**
+Full documentation: **[docs/DIY_Challenge_Robot_Guide.pdf](docs/DIY_Challenge_Robot_Guide.pdf)**  
+GPU / CUDA guide: **[docs/Jetson_GPU_Guide.pdf](docs/Jetson_GPU_Guide.pdf)**
 
 ---
 
@@ -90,6 +91,18 @@ The **[DIY_Challenge_Robot_Guide.pdf](docs/DIY_Challenge_Robot_Guide.pdf)** is t
 | Look up what a script does and its arguments | §9 — Scripts Reference |
 | Fix a common error or sensor issue | §10 — Troubleshooting |
 | Add a new sensor, package, or swap the SLAM algorithm | §11 — Extending the Codebase |
+
+### Jetson GPU Guide — [docs/Jetson_GPU_Guide.pdf](docs/Jetson_GPU_Guide.pdf)
+
+| I want to… | GPU Guide Section |
+|---|---|
+| Understand what the GPU is and when it helps | §1 — What Is the Jetson Nano GPU? |
+| Learn CUDA fundamentals (kernels, threads, memory) | §2 — CUDA Programming Basics |
+| Use the GPU for inference WITHOUT writing CUDA code | §3 — TensorRT: GPU Inference Without CUDA |
+| Add a real-time object detector (YOLO) to the robot | §4 — GPU Inference Node in ROS 2 |
+| Speed up lidar point cloud processing on GPU | §5 — GPU-Accelerated Point Cloud Processing |
+| Monitor GPU usage and benchmark inference speed | §6 — Verify GPU Usage and Monitor Performance |
+| Quick checklist and troubleshooting GPU issues | §7 — Quick-Reference Checklist |
 
 ---
 
