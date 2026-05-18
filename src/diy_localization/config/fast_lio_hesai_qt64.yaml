@@ -1,0 +1,63 @@
+# FAST-LIO2 configuration for Hesai QT64 — DIY Challenge 2026
+# ═══════════════════════════════════════════════════════════════
+# CALIB NOTES:
+#   mapping.acc_cov, gyr_cov, b_acc_cov, b_gyr_cov  ← fill from imu_utils
+#     Allan variance output after 2–3 hr static recording.
+#   mapping.extrinsic_T, extrinsic_R                 ← fill from lidar_imu_calib
+#     after figure-8 calibration run.  Use result exactly — a 1° rotation
+#     error causes ~2 cm/m positional drift.
+#   common.time_offset_lidar_to_imu                  ← verify via timestamp
+#     spin test (see scripts/calibrate_extrinsics.sh). Target < 1 ms.
+
+/**:
+    ros__parameters:
+        feature_extract_enable: false   # iEKF mode — no feature extraction
+        point_filter_num: 3
+        max_iteration: 3
+        filter_size_surf: 0.3           # smaller than mid360 default suits QT64
+        filter_size_map: 0.3
+        cube_side_length: 1000.0
+        runtime_pos_log_enable: false   # set true when profiling performance
+
+        common:
+            lid_topic:  "/hesai/points"
+            imu_topic:  "/imu/data"
+            time_sync_en: false         # use hardware sync if available
+            # CALIB: set from timestamp spin test — target < 0.001 s
+            time_offset_lidar_to_imu: 0.0
+
+        preprocess:
+            lidar_type: 2               # 2 = Velodyne-style PointCloud2 (QT64 driver)
+            scan_line:  64              # Hesai QT64 = 64 channels
+            blind: 0.3                  # ignore returns < 0.3 m (body occlusion)
+            timestamp_unit: 3           # microseconds
+            scan_rate: 20               # QT64 runs at 20 Hz
+
+        mapping:
+            # ── CALIB: replace with imu_utils Allan variance output ──
+            acc_cov:   0.1              # accelerometer noise density (m/s²/√Hz)
+            gyr_cov:   0.1              # gyroscope noise density (rad/s/√Hz)
+            b_acc_cov: 0.0001           # accelerometer bias instability
+            b_gyr_cov: 0.0001           # gyroscope bias instability
+            fov_degree:    360.0
+            det_range:     80.0         # QT64 effective range (use 80 m to be safe)
+            extrinsic_est_en: true      # online extrinsic estimation is fine until
+                                        # lidar_imu_calib run completes; then disable
+            # ── CALIB: replace T with lidar_imu_calib extrinsic_T output ──
+            extrinsic_T: [ 0.0, 0.0, 0.0 ]
+            # ── CALIB: replace R with lidar_imu_calib extrinsic_R output (row-major) ──
+            extrinsic_R: [ 1.0, 0.0, 0.0,
+                           0.0, 1.0, 0.0,
+                           0.0, 0.0, 1.0 ]
+
+        publish:
+            path_en:             true
+            effect_map_en:       false
+            map_en:              true
+            scan_publish_en:     true
+            dense_publish_en:    false  # keep false on Jetson — saves bandwidth
+            scan_bodyframe_pub_en: true
+
+        pcd_save:
+            pcd_save_en: false          # set true during offline LIO-SAM sessions
+            interval: -1

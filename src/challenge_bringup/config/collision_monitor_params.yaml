@@ -1,0 +1,37 @@
+collision_monitor:
+  ros__parameters:
+    use_sim_time: false
+    base_frame_id: "base_link"
+    odom_frame_id: "odom"
+    cmd_vel_in_topic: "/cmd_vel_raw"
+    cmd_vel_out_topic: "/cmd_vel_safe"
+    transform_tolerance: 0.3
+    source_timeout: 1.0
+    stop_pub_timeout: 1.0
+
+    polygons: ["PolygonStop", "PolygonSlow"]
+
+    PolygonStop:
+      type: "polygon"
+      points: [0.35, 0.25, 0.35, -0.25, 0.00, -0.25, 0.00, 0.25]
+      action_type: "stop"
+      max_points: 3
+      visualize: true
+      enabled: true
+
+    PolygonSlow:
+      type: "polygon"
+      points: [0.50, 0.30, 0.50, -0.30, -0.25, -0.30, -0.25, 0.30]
+      action_type: "slowdown"
+      max_points: 3
+      slowdown_ratio: 0.4
+      visualize: true
+      enabled: true
+
+    observation_sources: ["hesai_points"]
+    hesai_points:
+      type: "pointcloud"
+      topic: "/hesai/points"
+      min_height: 0.05
+      max_height: 1.5
+      enabled: true

@@ -1,0 +1,91 @@
+# EKF1 — Local frame (odom → base_link)
+# ═══════════════════════════════════════
+# Fuses: FAST-LIO2 lidar odometry (50 Hz) + IMU angular velocity (400 Hz)
+# Output: /odometry/filtered at 50 Hz for Nav2 local MPPI controller
+#
+# CALIB NOTES:
+#   process_noise_covariance  ← tune with AprilTag calibration sessions
+#   initial_estimate_covariance ← tighten once FAST-LIO2 is validated
+#   See docs/diy-sad.html §6.3 for the Innovation-based EKF tuning procedure.
+#
+# Fused state: [x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az]
+#               0  1  2    3     4     5   6   7   8    9      10     11   12  13  14
+
+ekf_filter_node_odom:
+    ros__parameters:
+        frequency: 50.0
+        sensor_timeout: 0.1
+        two_d_mode: true            # outdoor ground robot — flatten to 2D
+        transform_time_offset: 0.0
+        transform_timeout: 0.0
+        print_diagnostics: true
+        debug: false
+
+        map_frame:       map
+        odom_frame:      odom
+        base_link_frame: base_link
+        world_frame:     odom       # EKF1 operates in odom frame
+
+        publish_tf: true
+        publish_acceleration: false
+
+        # ── Lidar odometry from FAST-LIO2 ──
+        # Provides: x, y, z, yaw, vx, vy, vyaw
+        odom0: /lidar_odometry
+        odom0_config: [true,  true,  false,   # x  y  z     (use x,y; z unused in 2D)
+                       false, false, true,    # roll pitch yaw
+                       true,  true,  false,   # vx vy vz
+                       false, false, true,    # vroll vpitch vyaw
+                       false, false, false]   # ax ay az
+        odom0_queue_size: 10
+        odom0_nodelay: false
+        odom0_differential: false
+        odom0_relative: false
+
+        # ── IMU — angular velocity continuity ──
+        # Provides: vroll, vpitch, vyaw (gyro) — smooths LiDAR scan gaps
+        imu0: /imu/data
+        imu0_config: [false, false, false,   # x  y  z
+                      false, false, false,   # roll pitch yaw (trust FAST-LIO2 for heading)
+                      false, false, false,   # vx vy vz
+                      true,  true,  true,    # vroll vpitch vyaw (gyroscope)
+                      false, false, false]   # ax ay az
+        imu0_queue_size: 10
+        imu0_nodelay: true
+        imu0_differential: false
+        imu0_relative: false
+        imu0_remove_gravitational_acceleration: true
+
+        # ── Process noise (Q) — CALIB: tune via AprilTag sessions ──
+        # [x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az]
+        process_noise_covariance: [0.05, 0,    0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
+                                   0,    0.05, 0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
+                                   0,    0,    0.06, 0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
+                                   0,    0,    0,    0.03, 0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
+                                   0,    0,    0,    0,    0.03, 0,    0,     0,     0,    0,    0,    0,    0,    0,    0,
+                                   0,    0,    0,    0,    0,    0.06, 0,     0,     0,    0,    0,    0,    0,    0,    0,
+                                   0,    0,    0,    0,    0,    0,    0.025, 0,     0,    0,    0,    0,    0,    0,    0,
+                                   0,    0,    0,    0,    0,    0,    0,     0.025, 0,    0,    0,    0,    0,    0,    0,
+                                   0,    0,    0,    0,    0,    0,    0,     0,     0.04, 0,    0,    0,    0,    0,    0,
+                                   0,    0,    0,    0,    0,    0,    0,     0,     0,    0.01, 0,    0,    0,    0,    0,
+                                   0,    0,    0,    0,    0,    0,    0,     0,     0,    0,    0.01, 0,    0,    0,    0,
+                                   0,    0,    0,    0,    0,    0,    0,     0,     0,    0,    0,    0.02, 0,    0,    0,
+                                   0,    0,    0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0.01, 0,    0,
+                                   0,    0,    0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0.01, 0,
+                                   0,    0,    0,    0,    0,    0,    0,     0,     0,    0,    0,    0,    0,    0,    0.015]
+
+        initial_estimate_covariance: [1e-9, 0,    0,    0,    0,    0,    0,    0,    0,    0,     0,     0,     0,    0,    0,
+                                      0,    1e-9, 0,    0,    0,    0,    0,    0,    0,    0,     0,     0,     0,    0,    0,
+                                      0,    0,    1e-9, 0,    0,    0,    0,    0,    0,    0,     0,     0,     0,    0,    0,
+                                      0,    0,    0,    1e-9, 0,    0,    0,    0,    0,    0,     0,     0,     0,    0,    0,
+                                      0,    0,    0,    0,    1e-9, 0,    0,    0,    0,    0,     0,     0,     0,    0,    0,
+                                      0,    0,    0,    0,    0,    1e-9, 0,    0,    0,    0,     0,     0,     0,    0,    0,
+                                      0,    0,    0,    0,    0,    0,    1e-9, 0,    0,    0,     0,     0,     0,    0,    0,
+                                      0,    0,    0,    0,    0,    0,    0,    1e-9, 0,    0,     0,     0,     0,    0,    0,
+                                      0,    0,    0,    0,    0,    0,    0,    0,    1e-9, 0,     0,     0,     0,    0,    0,
+                                      0,    0,    0,    0,    0,    0,    0,    0,    0,    1e-9,  0,     0,     0,    0,    0,
+                                      0,    0,    0,    0,    0,    0,    0,    0,    0,    0,     1e-9,  0,     0,    0,    0,
+                                      0,    0,    0,    0,    0,    0,    0,    0,    0,    0,     0,     1e-9,  0,    0,    0,
+                                      0,    0,    0,    0,    0,    0,    0,    0,    0,    0,     0,     0,     1e-9, 0,    0,
+                                      0,    0,    0,    0,    0,    0,    0,    0,    0,    0,     0,     0,     0,    1e-9, 0,
+                                      0,    0,    0,    0,    0,    0,    0,    0,    0,    0,     0,     0,     0,    0,    1e-9]
