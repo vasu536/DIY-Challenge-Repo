@@ -1060,6 +1060,211 @@ print(f"Throughput:   {N/(time.perf_counter()-t0):.1f} FPS")""", styles)
         'cuda-pcl (GPU point cloud library): https://github.com/NVIDIA-AI-IOT/cuda-pcl',
     ], styles)
 
+    story.append(PageBreak())
+
+    # ── Appendix A: Why core algorithms are NOT GPU-compatible ────────────────
+    story.append(H('Appendix A — Why the Core Navigation Algorithms Are Not GPU-Compatible', 'h1', styles))
+    story.append(hr(styles))
+    story.append(P(
+        'This appendix answers the direct question: <i>"Should I try to run FAST-LIO2, LIO-SAM, '
+        'Nav2, or the EKF on the Jetson GPU to improve performance?"</i> '
+        'The short answer is <b>no</b>. This section explains the technical reasons why, '
+        'algorithm by algorithm.', styles))
+    story.append(SP())
+    story.append(warn_box(
+        'Attempting to GPU-port these algorithms would add weeks of low-level CUDA engineering '
+        'for zero measurable gain at competition scale. Do not attempt it. '
+        'Use the GPU exclusively for the TensorRT inference pipeline described in §4.', styles))
+    story.append(SP())
+
+    story.append(H('A.1  The GPU Fundamental Requirement', 'h2', styles))
+    story.append(P(
+        'A GPU delivers speedup only when ALL of the following are true simultaneously:', styles))
+    story += B([
+        '<b>Massively parallel</b>: thousands of identical, independent operations per frame',
+        '<b>Regular memory access</b>: threads read consecutive addresses (coalesced access) — '
+        'every cache miss in GPU global memory costs ~500 cycles',
+        '<b>Uniform branching</b>: all threads in a warp execute the same path; divergence '
+        'serialises the warp back to single-threaded speed',
+        '<b>High arithmetic intensity</b>: many FLOPs per byte of data moved (otherwise '
+        'the bottleneck is memory bandwidth, not raw compute)',
+    ], styles)
+    story.append(P(
+        'Every core navigation algorithm in this repo fails at least one of these criteria. '
+        'The table below summarises the verdict; the subsections explain the technical reasons.', styles))
+    story.append(SP())
+
+    tbl_data = [
+        [Paragraph('Algorithm', styles['th']),
+         Paragraph('Primary Data Structure', styles['th']),
+         Paragraph('Why GPU Cannot Help', styles['th']),
+         Paragraph('Verdict', styles['th'])],
+        [Paragraph('FAST-LIO2', styles['tc']),
+         Paragraph('ikd-Tree (incremental k-d tree)', styles['tc']),
+         Paragraph('Pointer-chasing tree traversal; sequential iEKF updates', styles['tc']),
+         Paragraph('CPU only', styles['tc'])],
+        [Paragraph('LIO-SAM', styles['tc']),
+         Paragraph('GTSAM Bayes tree factor graph', styles['tc']),
+         Paragraph('Factor graph optimisation is inherently sequential; '
+                   'linearisation order matters', styles['tc']),
+         Paragraph('CPU only', styles['tc'])],
+        [Paragraph('Nav2 MPPI planner', styles['tc']),
+         Paragraph('Trajectory rollout array', styles['tc']),
+         Paragraph('GPU MPPI only in Nav2 Jazzy+; Humble CPU MPPI is well-tuned '
+                   'for <200 trajectories', styles['tc']),
+         Paragraph('CPU only\n(Humble)', styles['tc'])],
+        [Paragraph('EKF (robot_localization)', styles['tc']),
+         Paragraph('6×6 or 15×15 state matrix', styles['tc']),
+         Paragraph('State vector too small; GPU launch overhead exceeds the '
+                   'entire matrix multiply time', styles['tc']),
+         Paragraph('CPU only', styles['tc'])],
+        [Paragraph('ndt_omp_ros2', styles['tc']),
+         Paragraph('Voxel grid + normal distributions', styles['tc']),
+         Paragraph('OpenMP CPU threads already saturate available cores; '
+                   'GPU port exists but requires CUDA NDT library', styles['tc']),
+         Paragraph('CPU preferred', styles['tc'])],
+    ]
+    tbl = Table(tbl_data, colWidths=[3.2*cm, 4.5*cm, 7.2*cm, 2.5*cm])
+    tbl.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), C_NAVY),
+        ('ROWBACKGROUNDS', (0,1), (-1,-1), [C_LGREY, colors.white]),
+        ('GRID', (0,0), (-1,-1), 0.4, C_MGREY),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING', (0,0), (-1,-1), 5),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+        ('LEFTPADDING', (0,0), (-1,-1), 5),
+    ]))
+    story += [tbl, SP()]
+
+    story.append(H('A.2  FAST-LIO2 — ikd-Tree is GPU-Hostile by Design', 'h2', styles))
+    story.append(P(
+        'FAST-LIO2\'s scan-registration step is built around the <b>incremental k-d tree (ikd-Tree)</b>. '
+        'This is a balanced binary search tree stored as a linked list of heap-allocated nodes. '
+        'At each lidar scan, FAST-LIO2 performs:', styles))
+    story += B([
+        '<b>Nearest-neighbour queries</b>: traverse from root to leaf, following pointers at each level',
+        '<b>Incremental insertion/deletion</b>: rebalance sub-trees on new points',
+        '<b>Iterated Extended Kalman Filter (iEKF) update</b>: repeated 3×3 or 6×6 '
+        'matrix solves, each conditioned on the result of the previous',
+    ], styles)
+    story.append(P(
+        'GPU memory architecture is optimised for <i>sequential, strided</i> access to large '
+        'contiguous arrays — the opposite of pointer-following tree traversal. '
+        'Every node fetch during a k-d tree query is an unpredictable memory address. '
+        'On GPU this causes a <b>global memory miss costing ~500 cycles</b> per node visit. '
+        'With a typical tree depth of ~17 levels and ~5,000 nearest-neighbour queries per scan, '
+        'that is 85,000 cache misses per frame — at 10 Hz lidar this means the GPU spends '
+        '~425 million stall cycles simply waiting for memory.', styles))
+    story.append(P(
+        'The iEKF loop is equally problematic: each linearisation step depends on the output '
+        'of the previous step. This hard sequential dependency means only one CUDA thread can '
+        'be active at a time — a GPU running a for-loop.', styles))
+    story.append(note_box(
+        'FAST-LIO2 on CPU takes ~8–15 ms per scan on the Jetson Nano. '
+        'A GPU port of the ikd-Tree nearest-neighbour step would likely be '
+        '<i>slower</i> than the CPU version due to memory-bandwidth bottleneck, '
+        'while requiring ~2,000 lines of CUDA kernel code to implement correctly.', styles))
+
+    story.append(H('A.3  LIO-SAM — Factor Graph Optimisation is Sequential', 'h2', styles))
+    story.append(P(
+        'LIO-SAM uses <b>GTSAM</b> to maintain a factor graph of robot poses. '
+        'When new sensor measurements arrive, GTSAM performs iSAM2 (incremental '
+        'Smoothing and Mapping) to update the graph. The iSAM2 algorithm:', styles))
+    story += B([
+        'Identifies which variables in the Bayes tree are affected by the new factor',
+        'Re-linearises those variables <i>in topological order</i> (parent before child)',
+        'Back-substitutes in reverse topological order to recover the new estimate',
+    ], styles)
+    story.append(P(
+        'Both the forward and backward passes enforce a strict ordering. '
+        'There is no subset of these operations that can be done independently in parallel. '
+        'GPU parallelism requires independence — GTSAM\'s entire design principle '
+        'is the opposite.', styles))
+    story.append(P(
+        'Additionally, LIO-SAM already uses <b>OpenMP to parallelise feature extraction</b> '
+        'across ring channels and the ground segmentation step. These CPU threads already '
+        'saturate the Jetson Nano\'s 4-core ARM CPU. The factor graph optimisation itself '
+        'typically takes <2 ms per keyframe; it is not a bottleneck.', styles))
+
+    story.append(H('A.4  Nav2 MPPI — GPU Version Requires Nav2 Jazzy+', 'h2', styles))
+    story.append(P(
+        'MPPI (Model Predictive Path Integral) trajectory sampling is, in principle, '
+        'parallelisable — each sampled trajectory is independent. '
+        'NVIDIA showed a GPU MPPI implementation in Nav2. <b>However:</b>', styles))
+    story += B([
+        'The GPU MPPI controller in Nav2 was merged in <b>Nav2 Jazzy</b> (ROS 2 2024 LTS)',
+        'This repo uses <b>ROS 2 Humble</b> — the GPU MPPI plugin does not exist here',
+        'Backporting is non-trivial: it requires porting the entire CudaMPPI plugin and '
+        'its deps to Humble',
+        'At competition scale (indoor arena <20m), the default Humble CPU MPPI with '
+        '~50 trajectories is more than adequate — <10 ms per control cycle',
+    ], styles)
+    story.append(note_box(
+        'If this project ever migrates to ROS 2 Jazzy or Kilted, the GPU MPPI plugin '
+        'becomes available as a drop-in replacement for the CPU planner. '
+        'No code changes to the rest of the stack are needed at that point.', styles))
+
+    story.append(H('A.5  EKF (robot_localization) — State Matrix Too Small', 'h2', styles))
+    story.append(P(
+        'The EKF fuses IMU, wheel odometry, and SLAM pose into a single state estimate. '
+        'The state vector is at most 15 elements (full 6-DOF with derivatives). '
+        'The prediction step requires a 15×15 matrix multiply and a 15-element vector add. '
+        'On CPU this takes <b>~1–5 microseconds</b>.', styles))
+    story.append(P(
+        'Launching a CUDA kernel has a fixed overhead of <b>~5–15 microseconds</b> just '
+        'for the kernel launch + memory transfer, before any computation begins. '
+        'Moving the EKF predict step to GPU would make it 5–15× <i>slower</i>, not faster.', styles))
+    story.append(P(
+        'GPU acceleration makes sense when the kernel runs for milliseconds (DNN inference, '
+        'image processing). For microsecond-scale state updates, the overhead dominates.', styles))
+
+    story.append(H('A.6  Final Recommendation', 'h2', styles))
+    story.append(P(
+        'The table below is the definitive answer for where to invest GPU effort '
+        'in a competition run with this software stack:', styles))
+    story.append(SP())
+    tbl2_data = [
+        [Paragraph('Component', styles['th']),
+         Paragraph('Run on GPU?', styles['th']),
+         Paragraph('Action', styles['th'])],
+        [Paragraph('FAST-LIO2', styles['tc']),
+         Paragraph('No', styles['tc']),
+         Paragraph('Leave on CPU. Lock Jetson clocks with nvpmodel -m 0 + jetson_clocks '
+                   'to get max CPU frequency.', styles['tc'])],
+        [Paragraph('LIO-SAM', styles['tc']),
+         Paragraph('No', styles['tc']),
+         Paragraph('Leave on CPU. OpenMP already saturates cores.', styles['tc'])],
+        [Paragraph('Nav2 + EKF', styles['tc']),
+         Paragraph('No', styles['tc']),
+         Paragraph('Leave on CPU. Not a bottleneck at competition scale.', styles['tc'])],
+        [Paragraph('Point cloud downsampling\n(upstream of FAST-LIO2)', styles['tc']),
+         Paragraph('Optional', styles['tc']),
+         Paragraph('Use cuda-pcl voxel grid (§5) only if FAST-LIO2 is dropping scans '
+                   'due to CPU overload at high lidar frequency.', styles['tc'])],
+        [Paragraph('YOLOv8 obstacle detection', styles['tc']),
+         Paragraph('<b>YES</b>', styles['tc']),
+         Paragraph('This is the right workload. Use TensorRT inference node (§4). '
+                   'Expected: 55–85 FPS on Nano GPU vs 1–2 FPS on CPU.', styles['tc'])],
+    ]
+    tbl2 = Table(tbl2_data, colWidths=[4.0*cm, 2.8*cm, 10.6*cm])
+    tbl2.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), C_NAVY),
+        ('ROWBACKGROUNDS', (0,1), (-1,-1), [C_LGREY, colors.white]),
+        ('BACKGROUND', (1,5), (1,5), colors.HexColor('#166534')),
+        ('TEXTCOLOR', (1,5), (1,5), colors.white),
+        ('GRID', (0,0), (-1,-1), 0.4, C_MGREY),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING', (0,0), (-1,-1), 5),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+        ('LEFTPADDING', (0,0), (-1,-1), 5),
+    ]))
+    story += [tbl2, SP()]
+
+    story.append(warn_box(
+        'ZERO changes to FAST-LIO2, LIO-SAM, Nav2, or EKF source code are needed or beneficial. '
+        'The only productive use of the Jetson GPU for this competition stack is '
+        'the TensorRT obstacle-detection node in §4.', styles))
+
     return story
 
 
