@@ -14,11 +14,14 @@
 	path = third_party_ws/src/lidar_imu_calib
 	url = https://github.com/KnightSnape/lidar_imu_calib.git
 	branch = main
+	ignore = dirty
 [submodule "third_party_ws/src/livox_ros_driver2"]
 	path = third_party_ws/src/livox_ros_driver2
 	url = https://github.com/Livox-SDK/livox_ros_driver2.git
 	branch = master
+	ignore = dirty
 [submodule "third_party_ws/src/ndt_omp_ros2"]
 	path = third_party_ws/src/ndt_omp_ros2
 	url = https://github.com/rsasaki0109/ndt_omp_ros2.git
 	branch = humble
+	ignore = dirty
