@@ -1242,16 +1242,15 @@ print(f"Throughput:   {N/(time.perf_counter()-t0):.1f} FPS")""", styles)
          Paragraph('Use cuda-pcl voxel grid (§5) only if FAST-LIO2 is dropping scans '
                    'due to CPU overload at high lidar frequency.', styles['tc'])],
         [Paragraph('YOLOv8 obstacle detection', styles['tc']),
-         Paragraph('<b>YES</b>', styles['tc']),
-         Paragraph('This is the right workload. Use TensorRT inference node (§4). '
-                   'Expected: 55–85 FPS on Nano GPU vs 1–2 FPS on CPU.', styles['tc'])],
+         Paragraph('Not recommended\n(see Appendix B)', styles['tc']),
+         Paragraph('The existing lidar-based Nav2 Collision Monitor already handles '
+                   'competition obstacles robustly. YOLOv8 adds engineering risk with '
+                   'marginal benefit. See Appendix B for the full analysis.', styles['tc'])],
     ]
     tbl2 = Table(tbl2_data, colWidths=[4.0*cm, 2.8*cm, 10.6*cm])
     tbl2.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), C_NAVY),
         ('ROWBACKGROUNDS', (0,1), (-1,-1), [C_LGREY, colors.white]),
-        ('BACKGROUND', (1,5), (1,5), colors.HexColor('#166534')),
-        ('TEXTCOLOR', (1,5), (1,5), colors.white),
         ('GRID', (0,0), (-1,-1), 0.4, C_MGREY),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         ('TOPPADDING', (0,0), (-1,-1), 5),
@@ -1260,10 +1259,142 @@ print(f"Throughput:   {N/(time.perf_counter()-t0):.1f} FPS")""", styles)
     ]))
     story += [tbl2, SP()]
 
+    story.append(note_box(
+        'ZERO changes to FAST-LIO2, LIO-SAM, Nav2, or EKF source code are needed or '
+        'beneficial for GPU use. The current CPU-only navigation stack is the right '
+        'architecture for this competition. See Appendix B for a full analysis of why '
+        'YOLOv8 is not the preferred obstacle-avoidance approach.', styles))
+
+    story.append(PageBreak())
+
+    # ── Appendix B: Why YOLOv8 is NOT preferred for obstacle avoidance ────────
+    story.append(H('Appendix B — Why YOLOv8 Is Not Preferred for Obstacle Avoidance', 'h1', styles))
+    story.append(hr(styles))
+    story.append(P(
+        'The §4 TensorRT inference pipeline demonstrates that YOLOv8 <i>can</i> run on the '
+        'Jetson GPU. This appendix explains why it should <b>not</b> replace or augment the '
+        'existing Nav2 Collision Monitor for the competition environment. '
+        'The current lidar-based approach is more robust, simpler, and better suited to the '
+        'conditions under which this robot competes.', styles))
+    story.append(SP())
+
+    story.append(H('B.1  What the Current Stack Already Does', 'h2', styles))
+    story.append(P(
+        'The Nav2 Collision Monitor watches the raw Hesai lidar point cloud in real time. '
+        'Two safety zones are configured around the robot:', styles))
+    story += B([
+        '<b>PolygonStop</b> (35 cm ahead, 50 cm wide): any 3+ lidar points → immediate hard stop',
+        '<b>PolygonSlow</b> (50 cm ahead, 60 cm wide): any 3+ lidar points → 40% speed reduction',
+    ], styles)
+    story.append(P(
+        'This is evaluated at the full lidar frequency (10–20 Hz) with deterministic latency. '
+        'No camera, no neural network, no GPU required. For any solid obstacle in the '
+        'competition arena — boxes, walls, people\'s legs, cones, barriers — the lidar '
+        'detects it reliably and the robot stops.', styles))
+
+    story.append(H('B.2  Why the Lidar-Only Approach Is Superior for This Competition', 'h2', styles))
+    tbl3_data = [
+        [Paragraph('Property', styles['th']),
+         Paragraph('Lidar Collision Monitor (current)', styles['th']),
+         Paragraph('YOLOv8 + Camera', styles['th'])],
+        [Paragraph('Detection principle', styles['tc']),
+         Paragraph('Physics — laser time-of-flight, independent of appearance', styles['tc']),
+         Paragraph('Pattern recognition — trained on labelled images', styles['tc'])],
+        [Paragraph('Lighting sensitivity', styles['tc']),
+         Paragraph('None — works in complete darkness', styles['tc']),
+         Paragraph('High — performance degrades with glare, shadows, overexposure', styles['tc'])],
+        [Paragraph('Unlabelled obstacle classes', styles['tc']),
+         Paragraph('Detects anything that reflects a laser pulse', styles['tc']),
+         Paragraph('Only detects classes present in training data', styles['tc'])],
+        [Paragraph('Latency', styles['tc']),
+         Paragraph('One lidar scan (~50–100 ms) — deterministic', styles['tc']),
+         Paragraph('Camera frame + TensorRT inference + ROS message (~30–80 ms, jitter)', styles['tc'])],
+        [Paragraph('Implementation risk', styles['tc']),
+         Paragraph('Already deployed and tested', styles['tc']),
+         Paragraph('Requires camera calibration, model conversion, topic plumbing', styles['tc'])],
+        [Paragraph('Failure modes', styles['tc']),
+         Paragraph('High-noise outdoor sun (long range); glass panels', styles['tc']),
+         Paragraph('Direct sun, lens flare, HDR scenes, unknown object classes', styles['tc'])],
+    ]
+    tbl3 = Table(tbl3_data, colWidths=[4.0*cm, 6.7*cm, 6.7*cm])
+    tbl3.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), C_NAVY),
+        ('ROWBACKGROUNDS', (0,1), (-1,-1), [C_LGREY, colors.white]),
+        ('GRID', (0,0), (-1,-1), 0.4, C_MGREY),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING', (0,0), (-1,-1), 5),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+        ('LEFTPADDING', (0,0), (-1,-1), 5),
+    ]))
+    story += [tbl3, SP()]
+
+    story.append(H('B.3  The Outdoor Morning Sun Scenario', 'h2', styles))
+    story.append(P(
+        'A common question is whether camera-based detection helps in an open outdoor field, '
+        'particularly in morning sun conditions. The answer is the opposite of the intuition: '
+        '<b>morning sun makes camera-based detection worse, not better</b>.', styles))
+    story.append(SP())
+    story.append(H('Effect on the lidar', 'h2', styles))
+    story += B([
+        'The Hesai lidar uses near-infrared laser pulses (905 nm). Direct sunlight raises '
+        'the background IR noise floor, which can increase false-positive returns at '
+        '<i>long range</i> (>10 m)',
+        'At the short ranges used by the Collision Monitor (0.35–0.50 m), reflected '
+        'laser pulses from solid obstacles are orders of magnitude stronger than solar noise — '
+        'the obstacle is detected just as reliably as indoors',
+        'The lidar is completely insensitive to sun direction',
+    ], styles)
+    story.append(SP())
+    story.append(H('Effect on a camera / YOLOv8', 'h2', styles))
+    story += B([
+        '<b>Sun facing the camera</b>: lens flare + full sensor overexposure — detector '
+        'confidence collapses to near zero for the entire frame',
+        '<b>Sun behind the camera</b>: obstacles are in deep shadow against a bright sky — '
+        'low contrast, YOLO struggles with under-lit foreground objects',
+        '<b>HDR scene</b> (bright sky + dark ground): sensor cannot expose correctly for '
+        'both simultaneously; standard camera ISP clips one or the other',
+        'YOLOv8n was trained on balanced-lighting datasets. Direct outdoor sun is one of '
+        'its worst-case input distributions',
+    ], styles)
     story.append(warn_box(
-        'ZERO changes to FAST-LIO2, LIO-SAM, Nav2, or EKF source code are needed or beneficial. '
-        'The only productive use of the Jetson GPU for this competition stack is '
-        'the TensorRT obstacle-detection node in §4.', styles))
+        'In an open field at low sun angle, a camera-based obstacle detector is '
+        'least reliable precisely when you are most likely to need it. '
+        'The lidar is unaffected by this condition.', styles))
+
+    story.append(H('B.4  The Narrow Case Where YOLO Would Add Value', 'h2', styles))
+    story.append(P(
+        'YOLOv8 is worth adding only if testing demonstrates that the current lidar-based '
+        'system provably misses obstacles that appear in the competition. '
+        'The specific cases where lidar fails:', styles))
+    story += B([
+        '<b>Transparent obstacles</b> (glass panels, clear acrylic sheets): laser passes '
+        'through, zero points returned, Collision Monitor is blind. Camera sees the object visually.',
+        '<b>Very thin obstacles</b> (single thin pole, taut wire): may return fewer than '
+        'max_points: 3 at certain angles, slipping past the threshold.',
+        '<b>Above-lidar overhangs</b>: the height filter (0.05–1.5 m) means an obstacle '
+        'above 1.5 m is ignored. A downward-facing camera could catch a low ceiling.',
+    ], styles)
+    story.append(P(
+        'Unless the competition arena contains glass panels or sub-3-point thin obstacles '
+        'confirmed through a test run, none of these cases justify the implementation cost.', styles))
+
+    story.append(H('B.5  Decision Rule', 'h2', styles))
+    story.append(P(
+        'Use the following rule when deciding whether to add YOLOv8:', styles))
+    story += B([
+        'Run the robot through the actual competition course (or a representative mock-up)',
+        'Review the rosbag: check if any obstacle was approached without the Collision Monitor '
+        'triggering a stop or slowdown',
+        'If yes — identify whether the missed obstacle is glass, a thin pole, or a class that '
+        'YOLOv8 can detect reliably. If so, add the detector node.',
+        'If no missed obstacles — the current stack is sufficient. Do not add YOLO.',
+    ], styles)
+    story.append(note_box(
+        'For the vast majority of competition run conditions — indoor arenas, outdoor courses '
+        'with standard solid obstacles, any lighting — the lidar Collision Monitor is the '
+        'correct and sufficient approach. The current software stack is competition-ready '
+        'as-is. Invest available time in tuning nav2_params.yaml and running practice laps, '
+        'not in adding camera infrastructure.', styles))
 
     return story
 
